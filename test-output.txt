@@ -1,0 +1,71 @@
+
+> mock-mock@1.0.0 dev
+> ts-node src/cli.ts --url https://totersapps.atlassian.net/wiki/spaces/ProductEng/pages/655949830/Milestone+3+-+Mother+Category+ERD --port 4000 --debug
+
+[dotenv@17.2.4] injecting env (2) from .env -- tip: 🔑 add access controls to secrets: https://dotenvx.com/ops
+🚀 MockMock CLI
+
+📄 Fetching Confluence page: https://totersapps.atlassian.net/wiki/spaces/ProductEng/pages/655949830/Milestone+3+-+Mother+Category+ERD
+🔐 Using Confluence REST API with authentication
+
+✅ Page fetched successfully
+
+🐛 Debug: HTML saved to debug.html
+
+🔍 Parsing API endpoints...
+🐛 Debug: Parsed endpoints:
+[
+  {
+    "path": "/api/inventory/mother-categories",
+    "method": "GET",
+    "response": {
+      "message": "Success",
+      "data": {}
+    },
+    "status": 200
+  },
+  {
+    "path": "/api/inventory/mother-categories/{motherCatId}/linkedCategories",
+    "method": "GET",
+    "response": {
+      "message": "Success",
+      "data": {}
+    },
+    "status": 200
+  },
+  {
+    "path": "/api/inventory/mother-categories/{motherCatId}/categories-assignable",
+    "method": "GET",
+    "response": {
+      "message": "Success",
+      "data": {}
+    },
+    "status": 200
+  },
+  {
+    "path": "/api/homepage/v2/stores/{storeId}/aisles",
+    "method": "GET",
+    "response": {
+      "message": "Success",
+      "data": {}
+    },
+    "status": 200
+  }
+]
+
+✅ Found 4 endpoint(s)
+
+
+📡 Registering endpoints:
+
+   GET    /api/inventory/mother-categories
+   GET    /api/inventory/mother-categories/{motherCatId}/linkedCategories
+   GET    /api/inventory/mother-categories/{motherCatId}/categories-assignable
+   GET    /api/homepage/v2/stores/{storeId}/aisles
+
+✅ Mock server started successfully!
+
+🌐 Base URL: http://localhost:4000
+📊 Total endpoints: 4
+💚 Health check: http://localhost:4000/health
+

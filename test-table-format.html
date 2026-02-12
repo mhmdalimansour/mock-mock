@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test - Table Format</title>
+</head>
+<body>
+    <h1>Get all Mother Categories</h1>
+    
+    <table>
+        <tr>
+            <td>Work</td>
+            <td>Get all Mother Categories</td>
+        </tr>
+        <tr>
+            <td>Short Description</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td>Status</td>
+            <td>NEW</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>api/inventory/mother-categories</td>
+        </tr>
+        <tr>
+            <td>Method</td>
+            <td>GET</td>
+        </tr>
+    </table>
+
+    <h3>Code snippets for the above endpoint</h3>
+    <pre>
+Response Structure:
+{
+  "errors": false,
+  "data": [
+    {
+      "id": 1,
+      "title": {
+        "en": "Food",
+        "ar": "طعام"
+      },
+      "linked_companies_count": 3,
+      "linked_categories_count": 2
+    }
+  ]
+}
+    </pre>
+
+    <hr>
+
+    <h1>Create Mother Category</h1>
+    
+    <table>
+        <tr>
+            <td>Work</td>
+            <td>Create Mother Category</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>/api/inventory/mother-categories</td>
+        </tr>
+        <tr>
+            <td>Method</td>
+            <td>POST</td>
+        </tr>
+    </table>
+
+    <h3>Code snippets</h3>
+    <pre>
+Request Structure:
+{
+  "title": {
+    "en": "Electronics",
+    "ar": "إلكترونيات"
+  }
+}
+
+Response Structure:
+{
+  "errors": false,
+  "data": {
+    "id": 2,
+    "title": {
+      "en": "Electronics",
+      "ar": "إلكترونيات"
+    },
+    "linked_companies_count": 0,
+    "linked_categories_count": 0
+  }
+}
+    </pre>
+
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Documentation</title>
+</head>
+<body>
+    <h1>User Management API</h1>
+    
+    <h2>Get All Users</h2>
+    <pre>
+GET /api/users
+
+Response:
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "John Doe",
+      "email": "john@example.com"
+    }
+  ]
+}
+    </pre>
+
+    <h2>Create User</h2>
+    <div class="code">
+POST /api/users
+
+Request:
+{
+  "name": "string",
+  "email": "string"
+}
+
+Response:
+{
+  "id": 1,
+  "name": "string",
+  "email": "string"
+}
+
+Status: 201
+    </div>
+
+    <h2>Update User</h2>
+    <code>
+PUT /api/users/1
+
+Request:
+{
+  "name": "string",
+  "email": "string"
+}
+
+Response:
+{
+  "id": 1,
+  "name": "string",
+  "email": "string"
+}
+    </code>
+
+    <h2>Delete User</h2>
+    <pre>
+DELETE /api/users/1
+
+Response:
+{
+  "success": true
+}
+    </pre>
+</body>
+</html>
