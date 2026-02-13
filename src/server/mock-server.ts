@@ -59,12 +59,31 @@ export function startMockServer(schema: MockSchema, port: number): void {
   });
 
   // Start server
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log('\n✅ Mock server started successfully!\n');
     console.log(`🌐 Base URL: http://localhost:${port}`);
     console.log(`📊 Total endpoints: ${schema.length}`);
     console.log(`💚 Health check: http://localhost:${port}/health\n`);
+    console.log('Press Ctrl+C to stop the server\n');
   });
+
+  // Graceful shutdown on Ctrl+C (SIGINT) or SIGTERM
+  const shutdown = () => {
+    console.log('\n\n🛑 Shutting down mock server...');
+    server.close(() => {
+      console.log('✅ Server stopped gracefully\n');
+      process.exit(0);
+    });
+
+    // Force close after 5 seconds if graceful shutdown fails
+    setTimeout(() => {
+      console.error('⚠️  Forced shutdown after timeout');
+      process.exit(1);
+    }, 5000);
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 /**
