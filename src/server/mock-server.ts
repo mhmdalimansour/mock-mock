@@ -1,4 +1,5 @@
 import express, { Request, Response, Application } from 'express';
+import cors from 'cors';
 import { MockSchema, MockEndpoint } from '../parser/schema-types';
 import { generateFakeData } from './data-generator';
 
@@ -17,6 +18,7 @@ export function startMockServer(schema: MockSchema, port: number): void {
   const app: Application = express();
 
   // Middleware
+  app.use(cors()); // Enable CORS for all origins
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
