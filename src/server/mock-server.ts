@@ -1,5 +1,6 @@
 import express, { Request, Response, Application } from 'express';
 import cors from 'cors';
+import axios from 'axios';
 import { MockSchema, MockEndpoint } from '../parser/schema-types';
 import { generateFakeData } from './data-generator';
 
@@ -14,7 +15,7 @@ function convertPathParams(path: string): string {
 /**
  * Starts an Express mock server with dynamically registered endpoints
  */
-export function startMockServer(schema: MockSchema, port: number): void {
+export function startMockServer(schema: MockSchema, port: number, fallbackUrl?: string): void {
   const app: Application = express();
 
   // Middleware
@@ -51,13 +52,55 @@ export function startMockServer(schema: MockSchema, port: number): void {
       server: 'MockMock',
       totalEndpoints: schema.length,
       baseUrl: `http://localhost:${port}`,
+      fallbackUrl: fallbackUrl || null,
       endpoints: endpointList
     });
   });
 
-  // 404 handler
-  app.use((_req: Request, res: Response) => {
-    res.status(404).json({ error: 'Endpoint not found' });
+  // Fallback proxy / 404 handler
+  app.use(async (req: Request, res: Response) => {
+    if (fallbackUrl) {
+      const baseUrl = fallbackUrl.replace(/\/+$/, '');
+      const targetUrl = `${baseUrl}${req.originalUrl}`;
+
+      try {
+        console.log(`⤵️  Proxying to fallback: ${req.method} ${targetUrl}`);
+
+        const proxyResponse = await axios({
+          method: req.method as any,
+          url: targetUrl,
+          headers: {
+            ...req.headers,
+            host: new URL(baseUrl).host,
+          },
+          data: ['GET', 'HEAD'].includes(req.method.toUpperCase()) ? undefined : req.body,
+          params: req.query,
+          validateStatus: () => true,
+          responseType: 'arraybuffer',
+        });
+
+        res.status(proxyResponse.status);
+
+        const skipHeaders = new Set(['transfer-encoding', 'connection', 'keep-alive']);
+        for (const [key, value] of Object.entries(proxyResponse.headers)) {
+          if (value && !skipHeaders.has(key.toLowerCase())) {
+            res.setHeader(key, value as string);
+          }
+        }
+
+        res.send(Buffer.from(proxyResponse.data));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`❌ Fallback proxy error: ${message}`);
+        res.status(502).json({
+          error: 'Fallback server unavailable',
+          target: targetUrl,
+          details: message,
+        });
+      }
+    } else {
+      res.status(404).json({ error: 'Endpoint not found' });
+    }
   });
 
   // Start server
@@ -65,6 +108,9 @@ export function startMockServer(schema: MockSchema, port: number): void {
     console.log('\n✅ Mock server started successfully!\n');
     console.log(`🌐 Base URL: http://localhost:${port}`);
     console.log(`📊 Total endpoints: ${schema.length}`);
+    if (fallbackUrl) {
+      console.log(`🔀 Fallback: ${fallbackUrl}`);
+    }
     console.log(`💚 Health check: http://localhost:${port}/health\n`);
     console.log('Press Ctrl+C to stop the server\n');
   });

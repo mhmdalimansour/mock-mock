@@ -18,11 +18,13 @@ program
   .version('1.0.0')
   .requiredOption('-u, --url <url>', 'Confluence page URL containing API definitions')
   .option('-p, --port <port>', 'Port for mock server', '4000')
+  .option('-f, --fallback <url>', 'Fallback base URL to proxy requests not found in the ERD')
   .option('-d, --debug', 'Enable debug mode (saves HTML to debug.html)')
   .action(async (options) => {
     try {
       const url: string = options.url;
       const port: number = parseInt(options.port, 10);
+      const fallbackUrl: string | undefined = options.fallback;
 
       if (isNaN(port) || port < 1 || port > 65535) {
         console.error('❌ Invalid port number. Must be between 1 and 65535.');
@@ -56,7 +58,11 @@ program
       console.log(`✅ Found ${schema.length} endpoint(s)\n`);
 
       // Step 3: Start mock server
-      startMockServer(schema, port);
+      if (fallbackUrl) {
+        console.log(`🔀 Fallback URL: ${fallbackUrl}`);
+        console.log('   Unmatched requests will be proxied to this URL\n');
+      }
+      startMockServer(schema, port, fallbackUrl);
     } catch (error) {
       if (error instanceof Error) {
         console.error(`\n❌ Error: ${error.message}\n`);
