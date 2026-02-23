@@ -19,15 +19,22 @@ program
   .requiredOption('-u, --url <url>', 'Confluence page URL containing API definitions')
   .option('-p, --port <port>', 'Port for mock server', '4000')
   .option('-f, --fallback <url>', 'Fallback base URL to proxy requests not found in the ERD')
+  .option('--delay <ms>', 'Response delay in milliseconds to simulate real API latency', '0')
   .option('-d, --debug', 'Enable debug mode (saves HTML to debug.html)')
   .action(async (options) => {
     try {
       const url: string = options.url;
       const port: number = parseInt(options.port, 10);
+      const delay: number = parseInt(options.delay, 10);
       const fallbackUrl: string | undefined = options.fallback;
 
       if (isNaN(port) || port < 1 || port > 65535) {
         console.error('❌ Invalid port number. Must be between 1 and 65535.');
+        process.exit(1);
+      }
+
+      if (isNaN(delay) || delay < 0) {
+        console.error('❌ Invalid delay. Must be a non-negative number in milliseconds.');
         process.exit(1);
       }
 
@@ -62,7 +69,7 @@ program
         console.log(`🔀 Fallback URL: ${fallbackUrl}`);
         console.log('   Unmatched requests will be proxied to this URL\n');
       }
-      startMockServer(schema, port, fallbackUrl);
+      startMockServer(schema, port, fallbackUrl, delay);
     } catch (error) {
       if (error instanceof Error) {
         console.error(`\n❌ Error: ${error.message}\n`);
