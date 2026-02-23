@@ -1,0 +1,15 @@
+src/
+*.ts
+tsconfig.json
+.env
+debug.html
+test-parser.js
+QUICKSTART.md
+AUTH_SETUP.md
+SETUP_FOR_COLLEAGUES.md
+EXPORT_PAGE_GUIDE.md
+CONTRIBUTING.md
+CHANGES.md
+SUCCESS.md
+PRESENTATION_PROMPT.md
+.gitignore

@@ -13,16 +13,21 @@ import { startMockServer } from './server/mock-server';
 const program = new Command();
 
 program
-  .name('mockgen')
+  .name('mock-mock')
   .description('Generate mock API server from Confluence API documentation')
   .version('1.0.0')
   .requiredOption('-u, --url <url>', 'Confluence page URL containing API definitions')
   .option('-p, --port <port>', 'Port for mock server', '4000')
   .option('-f, --fallback <url>', 'Fallback base URL to proxy requests not found in the ERD')
   .option('--delay <ms>', 'Response delay in milliseconds to simulate real API latency', '0')
+  .option('-e, --email <email>', 'Confluence email (overrides CONFLUENCE_EMAIL env var)')
+  .option('-t, --token <token>', 'Confluence API token (overrides CONFLUENCE_API_TOKEN env var)')
   .option('-d, --debug', 'Enable debug mode (saves HTML to debug.html)')
   .action(async (options) => {
     try {
+      if (options.email) process.env.CONFLUENCE_EMAIL = options.email;
+      if (options.token) process.env.CONFLUENCE_API_TOKEN = options.token;
+
       const url: string = options.url;
       const port: number = parseInt(options.port, 10);
       const delay: number = parseInt(options.delay, 10);
