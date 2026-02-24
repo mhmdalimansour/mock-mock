@@ -11,11 +11,21 @@ import { parseERDFromHTML, validateSchema } from "./parser/erd-parser";
 import { startMockServer } from "./server/mock-server";
 import packageJson from "../package.json";
 
+const banner = `
+  __  __            _    __  __            _    
+ |  \\/  | ___   ___| | _|  \\/  | ___   ___| | __
+ | |\\/| |/ _ \\ / __| |/ / |\\/| |/ _ \\ / __| |/ /
+ | |  | | (_) | (__|   <| |  | | (_) | (__|   < 
+ |_|  |_|\\___/ \\___|_|\\_\\_|  |_|\\___/ \\___|_|\\_\\
+
+  Generate mock API servers from Confluence docs
+`;
+
 const program = new Command();
 
 program
   .name("mock-mock")
-  .description("Generate mock API server from Confluence API documentation")
+  .description(banner)
   .version(packageJson.version)
   .requiredOption(
     "-u, --url <url>",
