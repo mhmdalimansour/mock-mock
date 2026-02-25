@@ -91,84 +91,104 @@ function parseEndpointFromText(text: string): MockEndpoint | null {
 }
 
 /**
- * Extracts all code snippets from CDATA blocks in raw HTML
+ * Extracts request/response from CDATA blocks associated with a specific endpoint.
+ * Each block is checked for Response Structure and Body/Request keywords.
  */
-function extractCDATASnippets(html: string): { request?: unknown; response?: unknown }[] {
-  const snippets: { request?: unknown; response?: unknown }[] = [];
-  
-  // Find all CDATA blocks
-  const cdataRegex = /<!\[CDATA\[([\s\S]*?)\]\]>/g;
-  let match;
-  
-  while ((match = cdataRegex.exec(html)) !== null) {
-    const cdataContent = match[1];
-    
-    const snippet: { request?: unknown; response?: unknown } = {};
-    
-    // Extract Response Structure
-    if (cdataContent.includes('Response Structure:')) {
-      const responseJSON = extractCompleteJSON(cdataContent, 'Response Structure:');
-      if (responseJSON) {
-        snippet.response = responseJSON;
+function extractFromAssociatedBlocks(blocks: Array<{ position: number; content: string }>): { request?: unknown; response?: unknown } {
+  const result: { request?: unknown; response?: unknown } = {};
+
+  for (const block of blocks) {
+    const content = block.content;
+
+    if (!result.response) {
+      if (content.includes('Response Structure:')) {
+        const json = extractCompleteJSON(content, 'Response Structure:');
+        if (json) result.response = json;
+      } else if (content.includes('Response Structure')) {
+        const json = extractCompleteJSON(content, 'Response Structure');
+        if (json) result.response = json;
       }
     }
-    
-    // Extract Request Structure or Body
-    if (cdataContent.includes('Request Structure:') || cdataContent.includes('Body:')) {
-      const keyword = cdataContent.includes('Request Structure:') ? 'Request Structure:' : 'Body:';
-      const requestJSON = extractCompleteJSON(cdataContent, keyword);
-      if (requestJSON) {
-        snippet.request = requestJSON;
+
+    if (!result.request) {
+      if (content.includes('Request Structure:')) {
+        const json = extractCompleteJSON(content, 'Request Structure:');
+        if (json) result.request = json;
+      } else if (content.includes('Body:')) {
+        const json = extractCompleteJSON(content, 'Body:');
+        if (json) result.request = json;
+      } else if (content.includes('Request Body:')) {
+        const json = extractCompleteJSON(content, 'Request Body:');
+        if (json) result.request = json;
+      } else if (content.includes('Request:') && !content.includes('Response')) {
+        const json = extractCompleteJSON(content, 'Request:');
+        if (json) result.request = json;
       }
-    }
-    
-    if (snippet.response || snippet.request) {
-      snippets.push(snippet);
     }
   }
-  
-  return snippets;
+
+  return result;
 }
 
 /**
- * Parses endpoints from Confluence table format
- * Handles Confluence storage format (XML-like structure)
+ * Parses endpoints from Confluence table format.
+ * Uses positional association to correctly map CDATA code snippets
+ * to their owning table, even when endpoints have multiple CDATA blocks.
  */
 function parseTableBasedEndpoints($: cheerio.CheerioAPI, html: string): MockSchema {
   const endpoints: MockSchema = [];
 
-  // Extract all code snippets from CDATA blocks first
-  const allSnippets = extractCDATASnippets(html);
-  let snippetIndex = 0;
+  // Find positions of every <table in the raw HTML
+  const tablePositions: number[] = [];
+  const tableRegex = /<table[\s>]/gi;
+  let tMatch;
+  while ((tMatch = tableRegex.exec(html)) !== null) {
+    tablePositions.push(tMatch.index);
+  }
 
-  // Find all tables
+  // Find every CDATA block together with its position
+  const cdataBlocks: Array<{ position: number; content: string }> = [];
+  const cdataRegex = /<!\[CDATA\[([\s\S]*?)\]\]>/g;
+  let cMatch;
+  while ((cMatch = cdataRegex.exec(html)) !== null) {
+    cdataBlocks.push({ position: cMatch.index, content: cMatch[1] });
+  }
+
   const tables = $('table').toArray();
 
-  console.log(`[DEBUG] Found ${tables.length} tables in HTML`);
-  
+  console.log(`[DEBUG] Found ${tables.length} tables, ${cdataBlocks.length} CDATA blocks`);
+
   for (let i = 0; i < tables.length; i++) {
     const table = tables[i];
     const endpoint = parseEndpointFromTable($, table);
-    
+
     console.log(`[DEBUG] Table ${i + 1}: ${endpoint ? `${endpoint.method} ${endpoint.path}` : 'No endpoint found'}`);
-    
+
     if (endpoint) {
-      // Use the next available code snippet from CDATA
-      const codeSnippet = allSnippets[snippetIndex] || {};
-      
-      endpoint.response = codeSnippet.response || { message: 'Success', data: {} };
-      endpoint.request = codeSnippet.request;
-      
-      // Determine status based on method
+      const thisTablePos = i < tablePositions.length ? tablePositions[i] : 0;
+      const nextTablePos = (i + 1 < tablePositions.length)
+        ? tablePositions[i + 1]
+        : html.length;
+
+      const associatedBlocks = cdataBlocks.filter(
+        b => b.position > thisTablePos && b.position < nextTablePos
+      );
+
+      console.log(`[DEBUG]   Associated CDATA blocks: ${associatedBlocks.length}`);
+
+      const snippet = extractFromAssociatedBlocks(associatedBlocks);
+
+      endpoint.response = snippet.response || { message: 'Success', data: {} };
+      endpoint.request = snippet.request;
+
       if (!endpoint.status) {
         endpoint.status = endpoint.method === 'POST' ? 201 : 200;
       }
-      
+
       endpoints.push(endpoint as MockEndpoint);
-      snippetIndex++;
     }
   }
-  
+
   console.log(`[DEBUG] Total endpoints parsed: ${endpoints.length}`);
 
   return endpoints;
@@ -295,53 +315,36 @@ function extractCompleteJSON(text: string, startKeyword: string): unknown | null
   try {
     return JSON.parse(jsonStr);
   } catch {
-    return null;
+    const sanitized = stripJSONComments(jsonStr);
+    try {
+      return JSON.parse(sanitized);
+    } catch {
+      return null;
+    }
   }
 }
 
 /**
- * Extracts request/response JSON from Confluence expand/code macros
+ * Strips single-line // comments that appear outside of JSON string values.
  */
-function extractCodeSnippetsFromExpand($: cheerio.CheerioAPI, elements: cheerio.Cheerio<any>): { request?: unknown; response?: unknown } {
-  const result: { request?: unknown; response?: unknown } = {};
-  
-  // Look for Confluence expand macros or code blocks
-  elements.each((_idx, elem) => {
-    const text = $(elem).text();
-    
-    // Look for "Response Structure:" or "Response:"
-    if (text.includes('Response Structure:')) {
-      const json = extractCompleteJSON(text, 'Response Structure:');
-      if (json) {
-        result.response = json;
+function stripJSONComments(jsonStr: string): string {
+  return jsonStr
+    .split('\n')
+    .map(line => {
+      let inString = false;
+      let escaped = false;
+      for (let i = 0; i < line.length - 1; i++) {
+        const char = line[i];
+        if (escaped) { escaped = false; continue; }
+        if (char === '\\') { escaped = true; continue; }
+        if (char === '"') { inString = !inString; continue; }
+        if (!inString && char === '/' && line[i + 1] === '/') {
+          return line.substring(0, i).trimEnd();
+        }
       }
-    } else if (text.includes('Response:') && !text.includes('Response Structure:')) {
-      const json = extractCompleteJSON(text, 'Response:');
-      if (json) {
-        result.response = json;
-      }
-    }
-    
-    // Look for "Request Structure:" or "Request Body:"
-    if (text.includes('Request Structure:')) {
-      const json = extractCompleteJSON(text, 'Request Structure:');
-      if (json) {
-        result.request = json;
-      }
-    } else if (text.includes('Request Body:')) {
-      const json = extractCompleteJSON(text, 'Request Body:');
-      if (json) {
-        result.request = json;
-      }
-    } else if (text.includes('Request:') && !text.includes('Response')) {
-      const json = extractCompleteJSON(text, 'Request:');
-      if (json) {
-        result.request = json;
-      }
-    }
-  });
-  
-  return result;
+      return line;
+    })
+    .join('\n');
 }
 
 /**
