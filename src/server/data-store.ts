@@ -5,6 +5,8 @@ import { MockEndpoint } from '../parser/schema-types';
 interface Collection {
   items: Record<string, unknown>[];
   template: unknown;
+  /** When the response is wrapped (e.g. { errors: false, data: [...] }), store the wrapper and the key that holds the array */
+  wrapper?: { shell: Record<string, unknown>; arrayKey: string };
 }
 
 /**
@@ -20,24 +22,23 @@ export class DataStore {
    */
   initFromSchema(schema: MockEndpoint[]): void {
     for (const endpoint of schema) {
-      if (
-        endpoint.method === 'GET' &&
-        Array.isArray(endpoint.response) &&
-        (endpoint.response as unknown[]).length > 0
-      ) {
-        const key = extractCollectionKey(endpoint.path);
-        if (!this.collections.has(key)) {
-          const template = (endpoint.response as unknown[])[0];
-          const count = faker.number.int({ min: 15, max: 30 });
-          const items = Array.from({ length: count }, (_, i) => {
-            const item = generateFakeData(template) as Record<string, unknown>;
-            const idField = findIdField(item) ?? 'id';
-            item[idField] = i + 1;
-            return item;
-          });
-          this.collections.set(key, { items, template });
-        }
-      }
+      if (endpoint.method !== 'GET') continue;
+
+      const key = extractCollectionKey(endpoint.path);
+      if (this.collections.has(key)) continue;
+
+      const arrayInfo = findArrayInResponse(endpoint.response);
+      if (!arrayInfo) continue;
+
+      const { templateItem, wrapper } = arrayInfo;
+      const count = faker.number.int({ min: 15, max: 30 });
+      const items = Array.from({ length: count }, (_, i) => {
+        const item = generateFakeData(templateItem) as Record<string, unknown>;
+        const idField = findIdField(item) ?? 'id';
+        item[idField] = i + 1;
+        return item;
+      });
+      this.collections.set(key, { items, template: templateItem, wrapper });
     }
   }
 
@@ -45,8 +46,17 @@ export class DataStore {
     return this.collections.has(key);
   }
 
-  getCollection(key: string): Record<string, unknown>[] | null {
-    return this.collections.get(key)?.items ?? null;
+  /**
+   * Returns the collection items wrapped in the original response structure
+   * if one existed, or as a plain array otherwise.
+   */
+  getCollection(key: string): unknown {
+    const col = this.collections.get(key);
+    if (!col) return null;
+    if (col.wrapper) {
+      return { ...col.wrapper.shell, [col.wrapper.arrayKey]: col.items };
+    }
+    return col.items;
   }
 
   getItem(key: string, id: string | number): Record<string, unknown> | null {
@@ -121,6 +131,34 @@ export function extractCollectionKey(path: string): string {
     }
   }
   return path;
+}
+
+/**
+ * Detect the array in a response template. Handles:
+ *   - Top-level array:      [{ id: 0, name: "" }]
+ *   - Wrapped array:        { errors: false, data: [{ id: 0, name: "" }] }
+ */
+function findArrayInResponse(
+  response: unknown,
+): { templateItem: unknown; wrapper?: { shell: Record<string, unknown>; arrayKey: string } } | null {
+  if (Array.isArray(response) && response.length > 0) {
+    return { templateItem: response[0] };
+  }
+
+  if (response && typeof response === 'object' && !Array.isArray(response)) {
+    const obj = response as Record<string, unknown>;
+    for (const [k, v] of Object.entries(obj)) {
+      if (Array.isArray(v) && v.length > 0) {
+        const shell: Record<string, unknown> = {};
+        for (const [sk, sv] of Object.entries(obj)) {
+          if (sk !== k) shell[sk] = sv;
+        }
+        return { templateItem: v[0], wrapper: { shell, arrayKey: k } };
+      }
+    }
+  }
+
+  return null;
 }
 
 function findIdField(item: Record<string, unknown>): string | null {
