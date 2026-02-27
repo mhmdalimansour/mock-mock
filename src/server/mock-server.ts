@@ -4,6 +4,7 @@ import axios from 'axios';
 import readline from 'readline';
 import { MockSchema, MockEndpoint } from '../parser/schema-types';
 import { generateFakeData } from './data-generator';
+import { DataStore, extractCollectionKey } from './data-store';
 
 let responseDelay = 0;
 
@@ -18,6 +19,10 @@ function sleep(ms: number): Promise<void> {
 export function startMockServer(schema: MockSchema, port: number, fallbackUrl?: string, delay: number = 0): void {
   responseDelay = delay;
 
+  // ── Generate all collections once, before any request hits ──────────────
+  const store = new DataStore();
+  store.initFromSchema(schema);
+
   const app: Application = express();
 
   app.use(cors());
@@ -25,9 +30,9 @@ export function startMockServer(schema: MockSchema, port: number, fallbackUrl?: 
   app.use(express.urlencoded({ extended: true }));
 
   console.log('\n📡 Registering endpoints:\n');
-  
+
   for (const endpoint of schema) {
-    registerEndpoint(app, endpoint);
+    registerEndpoint(app, endpoint, store);
     const expressPath = convertPathParams(endpoint.path);
     console.log(`   ${endpoint.method.padEnd(6)} ${expressPath}`);
   }
@@ -36,12 +41,12 @@ export function startMockServer(schema: MockSchema, port: number, fallbackUrl?: 
     const endpointList = schema.map(ep => {
       const expressPath = convertPathParams(ep.path);
       const examplePath = expressPath.replace(/:([^/]+)/g, (_, param) => `{${param}}`);
-      
+
       return {
         method: ep.method,
         path: expressPath,
         example: `http://localhost:${port}${examplePath}`,
-        description: `Replace {paramName} with actual values`
+        description: `Replace {paramName} with actual values`,
       };
     });
 
@@ -52,7 +57,7 @@ export function startMockServer(schema: MockSchema, port: number, fallbackUrl?: 
       baseUrl: `http://localhost:${port}`,
       fallbackUrl: fallbackUrl || null,
       delay: `${responseDelay}ms`,
-      endpoints: endpointList
+      endpoints: endpointList,
     });
   });
 
@@ -132,7 +137,6 @@ export function startMockServer(schema: MockSchema, port: number, fallbackUrl?: 
     setupStdinDelayControl();
   });
 
-  // Graceful shutdown on Ctrl+C (SIGINT) or SIGTERM
   const shutdown = () => {
     console.log('\n\n🛑 Shutting down mock server...');
     server.close(() => {
@@ -140,7 +144,6 @@ export function startMockServer(schema: MockSchema, port: number, fallbackUrl?: 
       process.exit(0);
     });
 
-    // Force close after 5 seconds if graceful shutdown fails
     setTimeout(() => {
       console.error('⚠️  Forced shutdown after timeout');
       process.exit(1);
@@ -152,39 +155,86 @@ export function startMockServer(schema: MockSchema, port: number, fallbackUrl?: 
 }
 
 /**
- * Registers a single endpoint with Express
+ * Registers a single endpoint with Express, backed by the shared DataStore.
+ *
+ * Behaviour per HTTP method:
+ *   GET  (no path params)  → return the full cached collection (consistent across refreshes)
+ *   GET  (with :id)        → return the matching item from the cache
+ *   POST                   → insert a new item into the cache, return it
+ *   PUT / PATCH            → merge req.body into the cached item, return it
+ *   DELETE                 → remove the item from the cache, return 204
+ *
+ * Falls back to on-the-fly fake data generation when there is no matching
+ * cached collection (e.g. the endpoint has no corresponding GET-array pair).
  */
-function registerEndpoint(app: Application, endpoint: MockEndpoint): void {
+function registerEndpoint(app: Application, endpoint: MockEndpoint, store: DataStore): void {
   const { method, path, response, status = 200 } = endpoint;
-
   const expressPath = convertPathParams(path);
+  const collectionKey = extractCollectionKey(path);
+  const hasPathParams = expressPath.includes(':');
 
-  const handler = async (_req: Request, res: Response) => {
+  const handler = async (req: Request, res: Response) => {
     if (responseDelay > 0) {
       await sleep(responseDelay);
     }
-    const fakeData = generateFakeData(response);
-    res.status(status).json(fakeData);
+
+    // Detect the first path parameter name (usually "id")
+    const paramNames = Object.keys(req.params);
+    const idParam = paramNames.find(p => p.toLowerCase() === 'id') ?? paramNames[0];
+    const idValue = idParam ? req.params[idParam] : null;
+
+    switch (method) {
+      case 'GET': {
+        if (!hasPathParams && store.hasCollection(collectionKey)) {
+          return res.status(status).json(store.getCollection(collectionKey));
+        }
+        if (hasPathParams && idValue) {
+          const item = store.getItem(collectionKey, idValue);
+          if (item) return res.status(status).json(item);
+          // ID not in store — generate a one-off fake item
+          return res.status(status).json(generateFakeData(response));
+        }
+        return res.status(status).json(generateFakeData(response));
+      }
+
+      case 'POST': {
+        const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
+        const newItem = store.addItem(collectionKey, body);
+        return res.status(status).json(newItem);
+      }
+
+      case 'PUT':
+      case 'PATCH': {
+        if (idValue) {
+          const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
+          const updated = store.updateItem(collectionKey, idValue, body);
+          if (updated) return res.status(status).json(updated);
+          return res.status(404).json({ error: 'Not found' });
+        }
+        return res.status(status).json(generateFakeData(response));
+      }
+
+      case 'DELETE': {
+        if (idValue) {
+          const deleted = store.deleteItem(collectionKey, idValue);
+          if (deleted) return res.status(204).send();
+          return res.status(404).json({ error: 'Not found' });
+        }
+        return res.status(status).json(generateFakeData(response));
+      }
+
+      default:
+        return res.status(status).json(generateFakeData(response));
+    }
   };
 
   switch (method) {
-    case 'GET':
-      app.get(expressPath, handler);
-      break;
-    case 'POST':
-      app.post(expressPath, handler);
-      break;
-    case 'PUT':
-      app.put(expressPath, handler);
-      break;
-    case 'PATCH':
-      app.patch(expressPath, handler);
-      break;
-    case 'DELETE':
-      app.delete(expressPath, handler);
-      break;
-    default:
-      throw new Error(`Unsupported HTTP method: ${method}`);
+    case 'GET':    app.get(expressPath,    handler); break;
+    case 'POST':   app.post(expressPath,   handler); break;
+    case 'PUT':    app.put(expressPath,    handler); break;
+    case 'PATCH':  app.patch(expressPath,  handler); break;
+    case 'DELETE': app.delete(expressPath, handler); break;
+    default: throw new Error(`Unsupported HTTP method: ${method}`);
   }
 }
 

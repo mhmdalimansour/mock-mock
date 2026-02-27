@@ -15,8 +15,8 @@ export function generateFakeData(template: unknown): unknown {
       // Return empty array
       return [];
     }
-    // Generate 2-3 items based on the first template item
-    const itemCount = faker.number.int({ min: 2, max: 3 });
+    // Generate 15-30 items based on the first template item (fallback path)
+    const itemCount = faker.number.int({ min: 15, max: 30 });
     return Array.from({ length: itemCount }, () => generateFakeData(template[0]));
   }
 
