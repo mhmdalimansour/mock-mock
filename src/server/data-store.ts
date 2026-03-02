@@ -59,6 +59,16 @@ export class DataStore {
     return col.items;
   }
 
+  /**
+   * Wraps a single item in { errors: false, data: item } when the collection
+   * uses that response structure (per ERD spec).
+   */
+  wrapItemIfNeeded(key: string, item: Record<string, unknown>): unknown {
+    const col = this.collections.get(key);
+    if (!col?.wrapper) return item;
+    return { ...col.wrapper.shell, [col.wrapper.arrayKey]: item };
+  }
+
   getItem(key: string, id: string | number): Record<string, unknown> | null {
     const col = this.collections.get(key);
     if (!col) return null;

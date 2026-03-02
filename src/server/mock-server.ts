@@ -185,14 +185,21 @@ function registerEndpoint(app: Application, endpoint: MockEndpoint, store: DataS
 
     switch (method) {
       case 'GET': {
-        if (!hasPathParams && store.hasCollection(collectionKey)) {
-          return res.status(status).json(store.getCollection(collectionKey));
-        }
-        if (hasPathParams && idValue) {
-          const item = store.getItem(collectionKey, idValue);
-          if (item) return res.status(status).json(item);
-          // ID not in store — generate a one-off fake item
-          return res.status(status).json(generateFakeData(response));
+        // Paths like /mother-categories (no params) or /mother-categories/1/linkedCategories (params but last segment is resource)
+        // → return full collection wrapped as { errors: false, data: [...] }
+        if (store.hasCollection(collectionKey)) {
+          const lastSegment = expressPath.split('/').filter(Boolean).pop() ?? '';
+          const lastSegmentIsParam = lastSegment.startsWith(':');
+          if (!lastSegmentIsParam) {
+            // Last segment is resource name → return collection (list)
+            return res.status(status).json(store.getCollection(collectionKey));
+          }
+          // Last segment is param (e.g. /mother-categories/:id) → get single item
+          if (idValue) {
+            const item = store.getItem(collectionKey, idValue);
+            if (item) return res.status(status).json(store.wrapItemIfNeeded(collectionKey, item));
+            return res.status(status).json(generateFakeData(response));
+          }
         }
         return res.status(status).json(generateFakeData(response));
       }
