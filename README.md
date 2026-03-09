@@ -1,60 +1,190 @@
 # MockMock
 
-> Production-grade CLI tool to generate mock API servers from Confluence documentation
+MockMock is a TypeScript CLI that turns Confluence API documentation into a running mock API server.
 
-MockMock fetches API endpoint definitions from Confluence pages, parses them into a structured schema, and spins up an Express mock server with those endpoints.
+It fetches a Confluence page or local HTML export, parses endpoint definitions into a normalized schema, and starts an Express server that returns generated yet stateful mock responses. It is useful when frontend or integration work needs a realistic API before the real backend is ready.
 
-## Features
+## What This Project Does
 
-- 🚀 **Fast Setup**: Generate a mock server in seconds
-- 📄 **Confluence Integration**: Fetches API definitions directly from Confluence pages
-- 🔒 **Auth Support**: Optional Basic Auth for private Confluence pages
-- 🎯 **Type-Safe**: Built with TypeScript for reliability
-- 🧩 **Modular Architecture**: Clean separation of concerns
-- 🌐 **Express-Powered**: Reliable and extensible mock server
+- Reads API definitions from Confluence pages or exported HTML files
+- Extracts endpoints from both table-based ERD pages and code blocks
+- Starts an Express server with dynamically registered routes
+- Generates realistic response data with `@faker-js/faker`
+- Keeps data in memory so `GET`, `POST`, `PUT`, `PATCH`, and `DELETE` behave like a lightweight API
+- Optionally proxies unmatched requests to a fallback server
+- Lets you simulate latency with startup flags, runtime endpoints, or stdin commands
+
+## How It Works
+
+MockMock has four main steps:
+
+1. The CLI in `src/cli.ts` reads command-line options and environment variables.
+2. The fetcher in `src/fetcher/confluence.ts` loads HTML from:
+   - a `file://` path
+   - a public Confluence page
+   - an authenticated Atlassian Confluence page via REST API
+3. The parser in `src/parser/erd-parser.ts` converts the HTML into a `MockSchema`.
+4. The server in `src/server/mock-server.ts` registers routes and serves responses backed by the in-memory `DataStore`.
+
+### Runtime Behavior
+
+- `GET` list endpoints return a generated collection if the response template contains an array.
+- `GET` item endpoints return one stored record when a matching item exists.
+- `POST` creates a new in-memory record.
+- `PUT` and `PATCH` update an existing record by id.
+- `DELETE` removes an existing record and returns `204`.
+- If no stored collection exists for an endpoint, MockMock falls back to generating data from the response template on demand.
+
+## Architecture
+
+```text
+mock-mock/
+├── src/
+│   ├── cli.ts
+│   ├── fetcher/
+│   │   └── confluence.ts
+│   ├── parser/
+│   │   ├── erd-parser.ts
+│   │   └── schema-types.ts
+│   └── server/
+│       ├── data-generator.ts
+│       ├── data-store.ts
+│       └── mock-server.ts
+├── example-confluence.html
+├── package.json
+└── tsconfig.json
+```
+
+### Core Modules
+
+- `src/cli.ts`: entrypoint, option parsing, orchestration
+- `src/fetcher/confluence.ts`: Confluence and local-file fetching
+- `src/parser/erd-parser.ts`: HTML parsing and endpoint extraction
+- `src/parser/schema-types.ts`: shared contract between parser and server
+- `src/server/data-generator.ts`: fake response generation
+- `src/server/data-store.ts`: in-memory collections and CRUD-like behavior
+- `src/server/mock-server.ts`: Express app, route registration, fallback proxy, health/config endpoints
 
 ## Installation
 
+### Local Development
+
 ```bash
 npm install
+```
+
+### Build the CLI
+
+```bash
 npm run build
 ```
 
-## Usage
+### Global Usage
 
-### Basic Usage
-
-```bash
-npm run dev -- --url https://your-confluence.com/pages/123456 --port 4000
-```
-
-Or using the built CLI:
+After building or publishing, the CLI command is:
 
 ```bash
-mockgen --url <confluence-url> --port 4000
+mock-mock --url <confluence-url>
 ```
 
-### Options
+## Quick Start
 
-- `--url, -u` **(required)**: Confluence page URL containing API definitions
-- `--port, -p` (optional): Port for the mock server (default: 4000)
-
-### Authentication
-
-For private Confluence pages, set these environment variables:
+### 1. Run Against the Example HTML
 
 ```bash
-export CONFLUENCE_EMAIL=your-email@example.com
-export CONFLUENCE_API_TOKEN=your-api-token
+npm run dev -- --url file://C:/absolute/path/to/example-confluence.html --port 4000
 ```
 
-Then run the CLI as normal.
+On macOS or Linux:
 
-## API Definition Format
-
-MockMock expects code blocks in your Confluence page with this format:
-
+```bash
+npm run dev -- --url file:///absolute/path/to/example-confluence.html --port 4000
 ```
+
+### 2. Run Against a Confluence Page
+
+```bash
+npm run dev -- --url https://your-domain.atlassian.net/wiki/spaces/SPACE/pages/123456/Page+Title --port 4000
+```
+
+### 3. Test the Server
+
+```bash
+curl http://localhost:4000/health
+curl http://localhost:4000/api/users
+curl -X POST http://localhost:4000/api/users -H "Content-Type: application/json" -d "{\"name\":\"John\"}"
+```
+
+## CLI Usage
+
+### Development Mode
+
+```bash
+npm run dev -- --url <url>
+```
+
+### Run the Built CLI
+
+```bash
+npm start -- --url <url>
+```
+
+### CLI Options
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `-u, --url <url>` | Confluence page URL or `file://` HTML path | required |
+| `-p, --port <port>` | Port for the mock server | `4000` |
+| `-f, --fallback <url>` | Proxy target for unmatched requests | none |
+| `--delay <ms>` | Response delay in milliseconds | `0` |
+| `-e, --email <email>` | Confluence email, overrides env var | none |
+| `-t, --token <token>` | Confluence API token, overrides env var | none |
+| `-d, --debug` | Save fetched HTML to `debug.html` and print parsed schema | `false` |
+
+### Example Commands
+
+```bash
+npm run dev -- --url file:///tmp/exported-page.html --port 4000
+npm run dev -- --url https://your-domain.atlassian.net/wiki/spaces/SPACE/pages/123456/Page+Title --delay 500
+npm run dev -- --url https://your-domain.atlassian.net/wiki/spaces/SPACE/pages/123456/Page+Title --fallback https://api.dev.example.com
+```
+
+## Authentication
+
+Private Confluence pages usually require credentials.
+
+Create a `.env` file or export the following variables:
+
+```bash
+CONFLUENCE_EMAIL=your-email@example.com
+CONFLUENCE_API_TOKEN=your-api-token
+```
+
+You can also pass them directly:
+
+```bash
+npm run dev -- --url <url> --email your-email@example.com --token your-api-token
+```
+
+### Fetching Rules
+
+- `file://...` reads a local HTML file
+- Atlassian Cloud URLs with credentials use the Confluence REST API
+- Other URLs are fetched as raw HTML
+- If Confluence returns a login page instead of the document, MockMock exits with an authentication error
+
+For more setup details, see `AUTH_SETUP.md`.
+
+## Supported Input Formats
+
+MockMock currently supports two Confluence patterns:
+
+- table-based endpoint documentation
+- code blocks containing endpoint definitions
+
+### Code Block Format
+
+```text
 POST /api/categories
 
 Request:
@@ -67,128 +197,126 @@ Response:
   "id": 1,
   "name": "string"
 }
-```
-
-### Supported Fields
-
-- **HTTP Method**: GET, POST, PUT, DELETE
-- **Path**: The endpoint path (e.g., `/api/users`)
-- **Request** (optional): JSON body schema
-- **Response** (required): JSON response body
-- **Status** (optional): HTTP status code (default: 200)
-
-### Example
-
-```
-GET /api/users
-
-Response:
-{
-  "users": [
-    {
-      "id": 1,
-      "name": "John Doe"
-    }
-  ]
-}
-```
-
-```
-POST /api/users
-
-Request:
-{
-  "name": "string",
-  "email": "string"
-}
-
-Response:
-{
-  "id": 1,
-  "name": "string",
-  "email": "string"
-}
 
 Status: 201
 ```
 
-## Architecture
+### Supported Methods
 
+- Table-based parsing supports `GET`, `POST`, `PUT`, `PATCH`, and `DELETE`.
+- Plain code-block parsing currently recognizes `GET`, `POST`, `PUT`, and `DELETE`.
+- The server runtime supports `PATCH` once an endpoint is present in the parsed schema.
+
+### Notes About Response Templates
+
+- Response objects are used as templates for fake data generation.
+- Response arrays are expanded into collections with about 15 to 30 records.
+- Wrapped collections such as `{ "errors": false, "data": [...] }` are preserved.
+- Path parameters in documentation can use `{id}` and are converted to Express-style params internally.
+- Plain code-block parsing is best with object-shaped JSON responses; table-based ERD pages are more flexible.
+
+## Server Endpoints
+
+In addition to parsed API routes, MockMock exposes a few built-in endpoints:
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/health` | `GET` | Shows registered endpoints and current configuration |
+| `/_config/delay` | `GET` | Returns current response delay |
+| `/_config/delay` | `PUT` | Updates response delay at runtime |
+
+You can also change delay from stdin while the server is running:
+
+```text
+delay 500
+delay
 ```
-mock-mock/
-  src/
-    cli.ts              # CLI entry point
-    fetcher/
-      confluence.ts     # Confluence page fetcher
-    parser/
-      erd-parser.ts     # Endpoint parser
-      schema-types.ts   # Schema definitions
-    server/
-      mock-server.ts    # Express mock server
-  package.json
-  tsconfig.json
-```
 
-### Layer Independence
+## Developer Guide
 
-Each layer is independent and communicates through the `MockSchema` interface:
-
-1. **Fetcher**: Retrieves raw HTML from Confluence
-2. **Parser**: Extracts and normalizes endpoints into `MockSchema`
-3. **Server**: Consumes `MockSchema` and creates Express routes
-
-## Development
-
-### Run in Development Mode
+### Scripts
 
 ```bash
-npm run dev -- --url <confluence-url>
-```
-
-### Build
-
-```bash
+npm install
 npm run build
+npm run dev -- --url file://C:/absolute/path/to/example-confluence.html
+npm start -- --url file://C:/absolute/path/to/example-confluence.html
 ```
 
-### Run Built Version
+### Tech Stack
 
-```bash
-npm start -- --url <confluence-url>
-```
+- TypeScript
+- Commander
+- Axios
+- Cheerio
+- Express
+- Faker
 
-## Error Handling
+### Development Flow
 
-MockMock gracefully handles:
+1. Update fetching logic in `src/fetcher/` if the Confluence source format changes.
+2. Update parsing logic in `src/parser/` when new ERD/table/code patterns need to be supported.
+3. Keep `MockEndpoint` and `MockSchema` in `src/parser/schema-types.ts` as the contract between layers.
+4. Update server behavior in `src/server/` when changing how routes, state, or fake responses work.
+5. Run `npm run build` to verify TypeScript compilation.
 
-- ❌ Invalid Confluence URLs
-- ❌ Network errors
-- ❌ Malformed JSON in code blocks
-- ❌ Missing endpoints
-- ❌ Invalid port numbers
+### Important Design Choices
+
+- The parser and server communicate through a simple schema contract.
+- The server is stateful only in memory; restarting the process resets all data.
+- Fake data generation is template-driven, so response structure depends on the documentation input.
+- Collections are derived from `GET` endpoints that expose arrays in the response template.
+
+### Project Structure for Contributors
+
+- `example-confluence.html`: local test fixture
+- `README.md`: main project documentation
+- `AUTH_SETUP.md`: authentication help
+- `QUICKSTART.md`: short setup walkthrough
+- `CONTRIBUTING.md`: contributor notes
+
+## Troubleshooting
+
+### No endpoints found
+
+- Check that the Confluence page contains supported tables or code blocks.
+- Use `--debug` to save `debug.html` and inspect the fetched HTML.
+
+### Authentication failed
+
+- Verify `CONFLUENCE_EMAIL` and `CONFLUENCE_API_TOKEN`.
+- Confirm the page is accessible to that account.
+- For Atlassian Cloud, make sure the URL contains a valid `/pages/<id>/` segment.
+
+### Unexpected response shape
+
+- Check the response JSON in Confluence.
+- Make sure wrapped arrays or nested objects are valid JSON.
+- Remember that fake data is inferred from field names and primitive types.
+
+### Changes disappear after restart
+
+This is expected. Data is stored only in memory.
 
 ## Example Output
 
-```
-🚀 MockMock CLI
+```text
+MockMock CLI
 
-📄 Fetching Confluence page: https://confluence.example.com/123456
-✅ Page fetched successfully
+Fetching Confluence page: https://confluence.example.com/pages/123456
+Page fetched successfully
 
-🔍 Parsing API endpoints...
-✅ Found 3 endpoint(s)
+Parsing API endpoints...
+Found 3 endpoint(s)
 
-📡 Registering endpoints:
+Registering endpoints:
+  GET    /api/users
+  POST   /api/users
+  DELETE /api/users/:id
 
-   GET    /api/users
-   POST   /api/users
-   DELETE /api/users/1
-
-✅ Mock server started successfully!
-
-🌐 Base URL: http://localhost:4000
-📊 Total endpoints: 3
-💚 Health check: http://localhost:4000/health
+Mock server started successfully
+Base URL: http://localhost:4000
+Health check: http://localhost:4000/health
 ```
 
 ## License
