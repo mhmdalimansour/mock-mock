@@ -1,6 +1,6 @@
 {
   "name": "@mhmdalimansour/mock-mock",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Production-grade CLI tool to generate mock servers from Confluence API documentation",
   "main": "dist/cli.js",
   "bin": {
