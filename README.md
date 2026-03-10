@@ -67,6 +67,14 @@ mock-mock/
 
 ## Installation
 
+### Install From npm
+
+```bash
+npm install -g @mhmdalimansour/mock-mock
+```
+
+This installs the package published on npm as `@mhmdalimansour/mock-mock` and exposes the CLI command `mock-mock`.
+
 ### Local Development
 
 ```bash
@@ -81,7 +89,7 @@ npm run build
 
 ### Global Usage
 
-After building or publishing, the CLI command is:
+After installing globally, the CLI command is:
 
 ```bash
 mock-mock --url <confluence-url>
