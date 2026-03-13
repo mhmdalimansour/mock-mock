@@ -87,7 +87,7 @@ program
 
       // Step 2: Parse endpoints
       console.log("🔍 Parsing API endpoints...");
-      const schema = parseERDFromHTML(html);
+      const schema = await parseERDFromHTML(html, { fallbackBaseUrl: fallbackUrl });
 
       if (options.debug && schema.length > 0) {
         console.log("🐛 Debug: Parsed endpoints:");
@@ -101,7 +101,8 @@ program
       // Step 3: Start mock server
       if (fallbackUrl) {
         console.log(`🔀 Fallback URL: ${fallbackUrl}`);
-        console.log("   Unmatched requests will be proxied to this URL\n");
+        console.log("   Truncated doc responses may be hydrated from this URL during parsing");
+        console.log("   Unmatched requests will also be proxied to this URL\n");
       }
       startMockServer(schema, port, fallbackUrl, delay);
     } catch (error) {

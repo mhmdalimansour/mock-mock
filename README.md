@@ -143,7 +143,7 @@ npm start -- --url <url>
 | --- | --- | --- |
 | `-u, --url <url>` | Confluence page URL or `file://` HTML path | required |
 | `-p, --port <port>` | Port for the mock server | `4000` |
-| `-f, --fallback <url>` | Proxy target for unmatched requests | none |
+| `-f, --fallback <url>` | Base URL used for truncated-response hydration during parsing and as a proxy target for unmatched runtime requests | none |
 | `--delay <ms>` | Response delay in milliseconds | `0` |
 | `-e, --email <email>` | Confluence email, overrides env var | none |
 | `-t, --token <token>` | Confluence API token, overrides env var | none |
@@ -212,7 +212,7 @@ Status: 201
 ### Supported Methods
 
 - Table-based parsing supports `GET`, `POST`, `PUT`, `PATCH`, and `DELETE`.
-- Plain code-block parsing currently recognizes `GET`, `POST`, `PUT`, and `DELETE`.
+- Plain code-block parsing currently recognizes `GET`, `POST`, `PUT`, `PATCH`, and `DELETE`.
 - The server runtime supports `PATCH` once an endpoint is present in the parsed schema.
 
 ### Notes About Response Templates
@@ -220,6 +220,7 @@ Status: 201
 - Response objects are used as templates for fake data generation.
 - Response arrays are expanded into collections with about 15 to 30 records.
 - Wrapped collections such as `{ "errors": false, "data": [...] }` are preserved.
+- If a table-based `Response Structure` contains `.....`, MockMock treats it as a truncated example, fetches the live payload from `--fallback` for safe read-only endpoints, then adds any documented fields that are missing from that payload.
 - Path parameters in documentation can use `{id}` and are converted to Express-style params internally.
 - Plain code-block parsing is best with object-shaped JSON responses; table-based ERD pages are more flexible.
 
@@ -300,6 +301,8 @@ npm start -- --url file://C:/absolute/path/to/example-confluence.html
 
 - Check the response JSON in Confluence.
 - Make sure wrapped arrays or nested objects are valid JSON.
+- For truncated `.....` examples, provide `--fallback` so MockMock can hydrate the missing structure from the live API.
+- Parse-time fallback hydration is limited to read-only endpoints such as `GET`; non-`GET` endpoints keep the documented fields only.
 - Remember that fake data is inferred from field names and primitive types.
 
 ### Changes disappear after restart

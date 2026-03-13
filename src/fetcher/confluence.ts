@@ -1,6 +1,5 @@
 import axios, { AxiosRequestConfig } from 'axios';
 import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
 
 /**
  * Extracts page ID from Confluence URL
@@ -116,6 +115,44 @@ export async function fetchConfluencePage(url: string): Promise<string> {
     }
     throw error;
   }
+}
+
+/**
+ * Fetches a live endpoint payload from the fallback API during parsing.
+ * This is intentionally limited to safe read-only methods.
+ */
+export async function fetchFallbackEndpointResponse(
+  baseUrl: string,
+  path: string,
+  method: string,
+): Promise<unknown> {
+  const normalizedMethod = method.toUpperCase();
+  if (!['GET', 'HEAD'].includes(normalizedMethod)) {
+    throw new Error(
+      `Skipping fallback hydration for ${normalizedMethod} ${path} because parse-time hydration only supports read-only endpoints.`
+    );
+  }
+
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const targetUrl = `${normalizedBaseUrl}${normalizedPath}`;
+
+  const response = await axios({
+    method: normalizedMethod as 'GET' | 'HEAD',
+    url: targetUrl,
+    headers: {
+      Accept: 'application/json',
+    },
+    validateStatus: () => true,
+  });
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(
+      `Fallback request failed for ${normalizedMethod} ${targetUrl} with status ${response.status}.`
+    );
+  }
+
+  return response.data;
 }
 
 /**

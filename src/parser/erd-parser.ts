@@ -1,16 +1,31 @@
 import * as cheerio from 'cheerio';
+import { fetchFallbackEndpointResponse } from '../fetcher/confluence';
 import { MockEndpoint, MockSchema } from './schema-types';
 
 /**
  * Parses API endpoint definitions from Confluence HTML
  * Supports both code blocks and table-based formats
  */
-export function parseERDFromHTML(html: string): MockSchema {
+export interface ParseERDOptions {
+  fallbackBaseUrl?: string;
+}
+
+interface ExtractedJSONSnippet {
+  raw: string | null;
+  value: unknown | null;
+  partialValue: unknown | null;
+  isTruncated: boolean;
+}
+
+export async function parseERDFromHTML(
+  html: string,
+  options: ParseERDOptions = {},
+): Promise<MockSchema> {
   const $ = cheerio.load(html);
   let endpoints: MockSchema = [];
 
   // Strategy 1: Try parsing tables (common in Confluence ERD pages)
-  const tableEndpoints = parseTableBasedEndpoints($, html);
+  const tableEndpoints = await parseTableBasedEndpoints($, html, options);
   if (tableEndpoints.length > 0) {
     endpoints.push(...tableEndpoints);
   }
@@ -23,7 +38,7 @@ export function parseERDFromHTML(html: string): MockSchema {
     if (!text) continue;
 
     try {
-      const endpoint = parseEndpointFromText(text);
+      const endpoint = await parseEndpointFromText(text, options);
       if (endpoint) {
         endpoints.push(endpoint);
       }
@@ -39,9 +54,12 @@ export function parseERDFromHTML(html: string): MockSchema {
 /**
  * Parses a single endpoint definition from text
  */
-function parseEndpointFromText(text: string): MockEndpoint | null {
+async function parseEndpointFromText(
+  text: string,
+  options: ParseERDOptions,
+): Promise<MockEndpoint | null> {
   // Match HTTP method and path (e.g., "POST /api/categories")
-  const methodPathRegex = /^(GET|POST|PUT|DELETE)\s+(\/[^\s\n]*)/im;
+  const methodPathRegex = /^(GET|POST|PUT|DELETE|PATCH)\s+(\/[^\s\n]*)/im;
   const methodPathMatch = text.match(methodPathRegex);
 
   if (!methodPathMatch) {
@@ -53,25 +71,20 @@ function parseEndpointFromText(text: string): MockEndpoint | null {
 
   // Extract Request JSON
   let request: unknown = undefined;
-  const requestMatch = text.match(/Request:\s*\n\s*(\{[\s\S]*?\})/i);
-  if (requestMatch) {
-    try {
-      request = JSON.parse(requestMatch[1]);
-    } catch {
-      // Invalid JSON, skip request
-    }
+  const requestSnippet = extractStructuredJSON(text, 'Request:');
+  if (requestSnippet.value !== null) {
+    request = requestSnippet.value;
   }
 
   // Extract Response JSON
   let response: unknown = {};
-  const responseMatch = text.match(/Response:\s*\n\s*(\{[\s\S]*?\})/i);
-  if (responseMatch) {
-    try {
-      response = JSON.parse(responseMatch[1]);
-    } catch {
-      // Invalid JSON, use empty object
-      response = {};
-    }
+  const responseSnippet = extractStructuredJSON(text, 'Response:');
+  if (responseSnippet.raw) {
+    response = await resolveResponseSnippet(
+      { method, path, request, response: {}, status: undefined },
+      responseSnippet,
+      options,
+    ) ?? {};
   }
 
   // Extract status code if specified
@@ -94,35 +107,57 @@ function parseEndpointFromText(text: string): MockEndpoint | null {
  * Extracts request/response from CDATA blocks associated with a specific endpoint.
  * Each block is checked for Response Structure and Body/Request keywords.
  */
-function extractFromAssociatedBlocks(blocks: Array<{ position: number; content: string }>): { request?: unknown; response?: unknown } {
+async function extractFromAssociatedBlocks(
+  endpoint: Partial<MockEndpoint>,
+  blocks: Array<{ position: number; content: string }>,
+  options: ParseERDOptions,
+): Promise<{ request?: unknown; response?: unknown }> {
   const result: { request?: unknown; response?: unknown } = {};
 
   for (const block of blocks) {
     const content = block.content;
 
     if (!result.response) {
-      if (content.includes('Response Structure:')) {
-        const json = extractCompleteJSON(content, 'Response Structure:');
-        if (json) result.response = json;
-      } else if (content.includes('Response Structure')) {
-        const json = extractCompleteJSON(content, 'Response Structure');
-        if (json) result.response = json;
+      if (content.includes('Response Structure:') || content.includes('Response Structure')) {
+        const snippet = extractStructuredJSONFromKeywords(content, [
+          'Response Structure:',
+          'Response Structure',
+        ]);
+
+        if (snippet.raw && endpoint.method && endpoint.path) {
+          const resolved = await resolveResponseSnippet(
+            {
+              method: endpoint.method,
+              path: endpoint.path,
+              request: endpoint.request,
+              response: {},
+              status: endpoint.status,
+            },
+            snippet,
+            options,
+          );
+          if (resolved !== undefined) {
+            result.response = resolved;
+          }
+        } else if (snippet.value !== null) {
+          result.response = snippet.value;
+        }
       }
     }
 
     if (!result.request) {
       if (content.includes('Request Structure:')) {
-        const json = extractCompleteJSON(content, 'Request Structure:');
-        if (json) result.request = json;
+        const snippet = extractStructuredJSON(content, 'Request Structure:');
+        if (snippet.value !== null) result.request = snippet.value;
       } else if (content.includes('Body:')) {
-        const json = extractCompleteJSON(content, 'Body:');
-        if (json) result.request = json;
+        const snippet = extractStructuredJSON(content, 'Body:');
+        if (snippet.value !== null) result.request = snippet.value;
       } else if (content.includes('Request Body:')) {
-        const json = extractCompleteJSON(content, 'Request Body:');
-        if (json) result.request = json;
+        const snippet = extractStructuredJSON(content, 'Request Body:');
+        if (snippet.value !== null) result.request = snippet.value;
       } else if (content.includes('Request:') && !content.includes('Response')) {
-        const json = extractCompleteJSON(content, 'Request:');
-        if (json) result.request = json;
+        const snippet = extractStructuredJSON(content, 'Request:');
+        if (snippet.value !== null) result.request = snippet.value;
       }
     }
   }
@@ -135,7 +170,11 @@ function extractFromAssociatedBlocks(blocks: Array<{ position: number; content: 
  * Uses positional association to correctly map CDATA code snippets
  * to their owning table, even when endpoints have multiple CDATA blocks.
  */
-function parseTableBasedEndpoints($: cheerio.CheerioAPI, html: string): MockSchema {
+async function parseTableBasedEndpoints(
+  $: cheerio.CheerioAPI,
+  html: string,
+  options: ParseERDOptions,
+): Promise<MockSchema> {
   const endpoints: MockSchema = [];
 
   // Find positions of every <table in the raw HTML
@@ -176,7 +215,7 @@ function parseTableBasedEndpoints($: cheerio.CheerioAPI, html: string): MockSche
 
       console.log(`[DEBUG]   Associated CDATA blocks: ${associatedBlocks.length}`);
 
-      const snippet = extractFromAssociatedBlocks(associatedBlocks);
+      const snippet = await extractFromAssociatedBlocks(endpoint, associatedBlocks, options);
 
       endpoint.response = snippet.response || { message: 'Success', data: {} };
       endpoint.request = snippet.request;
@@ -264,54 +303,111 @@ function parseEndpointFromTable($: cheerio.CheerioAPI, table: any): Partial<Mock
 /**
  * Extracts a complete JSON object from text, handling nested structures
  */
-function extractCompleteJSON(text: string, startKeyword: string): unknown | null {
+function extractStructuredJSON(text: string, startKeyword: string): ExtractedJSONSnippet {
+  const raw = extractRawJSONBlock(text, startKeyword);
+  if (!raw) {
+    return {
+      raw: null,
+      value: null,
+      partialValue: null,
+      isTruncated: false,
+    };
+  }
+
+  const parsed = parseJSONWithComments(raw);
+  const isTruncated = hasTruncationMarker(raw);
+  const partialValue = isTruncated ? parsePartialJSON(raw) : null;
+
+  return {
+    raw,
+    value: parsed ?? partialValue,
+    partialValue,
+    isTruncated,
+  };
+}
+
+function extractStructuredJSONFromKeywords(
+  text: string,
+  keywords: string[],
+): ExtractedJSONSnippet {
+  for (const keyword of keywords) {
+    const snippet = extractStructuredJSON(text, keyword);
+    if (snippet.raw) {
+      return snippet;
+    }
+  }
+
+  return {
+    raw: null,
+    value: null,
+    partialValue: null,
+    isTruncated: false,
+  };
+}
+
+function extractRawJSONBlock(text: string, startKeyword: string): string | null {
   const startIndex = text.indexOf(startKeyword);
   if (startIndex === -1) return null;
-  
-  // Find the first opening brace after the keyword
-  const jsonStart = text.indexOf('{', startIndex);
+
+  const objectStart = text.indexOf('{', startIndex);
+  const arrayStart = text.indexOf('[', startIndex);
+  const jsonStart = getFirstJSONStart(objectStart, arrayStart);
   if (jsonStart === -1) return null;
-  
-  // Count braces to find the matching closing brace
-  let braceCount = 0;
+
+  const stack: string[] = [];
   let inString = false;
   let escapeNext = false;
   let jsonEnd = -1;
-  
+
   for (let i = jsonStart; i < text.length; i++) {
     const char = text[i];
-    
+
     if (escapeNext) {
       escapeNext = false;
       continue;
     }
-    
+
     if (char === '\\') {
       escapeNext = true;
       continue;
     }
-    
+
     if (char === '"') {
       inString = !inString;
       continue;
     }
-    
+
     if (inString) continue;
-    
+
     if (char === '{') {
-      braceCount++;
-    } else if (char === '}') {
-      braceCount--;
-      if (braceCount === 0) {
+      stack.push('}');
+    } else if (char === '[') {
+      stack.push(']');
+    } else if (char === '}' || char === ']') {
+      if (stack.length === 0 || stack[stack.length - 1] !== char) {
+        return null;
+      }
+
+      stack.pop();
+      if (stack.length === 0) {
         jsonEnd = i + 1;
         break;
       }
     }
   }
-  
+
   if (jsonEnd === -1) return null;
-  
-  const jsonStr = text.substring(jsonStart, jsonEnd);
+
+  return text.substring(jsonStart, jsonEnd);
+}
+
+function getFirstJSONStart(objectStart: number, arrayStart: number): number {
+  if (objectStart === -1) return arrayStart;
+  if (arrayStart === -1) return objectStart;
+  return Math.min(objectStart, arrayStart);
+}
+
+function parseJSONWithComments(jsonStr: string): unknown | null {
   try {
     return JSON.parse(jsonStr);
   } catch {
@@ -322,6 +418,115 @@ function extractCompleteJSON(text: string, startKeyword: string): unknown | null
       return null;
     }
   }
+}
+
+function hasTruncationMarker(jsonStr: string): boolean {
+  return jsonStr
+    .split('\n')
+    .some(line => /^\s*\.{3,},?\s*$/.test(line));
+}
+
+function parsePartialJSON(jsonStr: string): unknown | null {
+  const withoutMarkers = jsonStr
+    .split('\n')
+    .filter(line => !/^\s*\.{3,},?\s*$/.test(line))
+    .join('\n');
+
+  const withoutTrailingCommas = stripTrailingCommas(withoutMarkers);
+  return parseJSONWithComments(withoutTrailingCommas);
+}
+
+function stripTrailingCommas(jsonStr: string): string {
+  let current = jsonStr;
+  let previous = '';
+
+  while (current !== previous) {
+    previous = current;
+    current = current.replace(/,\s*([}\]])/g, '$1');
+  }
+
+  return current;
+}
+
+async function resolveResponseSnippet(
+  endpoint: MockEndpoint,
+  snippet: ExtractedJSONSnippet,
+  options: ParseERDOptions,
+): Promise<unknown | undefined> {
+  if (!snippet.raw) {
+    return undefined;
+  }
+
+  if (!snippet.isTruncated) {
+    return snippet.value ?? undefined;
+  }
+
+  return hydrateTruncatedResponse(endpoint, snippet.partialValue, options);
+}
+
+async function hydrateTruncatedResponse(
+  endpoint: MockEndpoint,
+  documentedResponse: unknown | null,
+  options: ParseERDOptions,
+): Promise<unknown | undefined> {
+  if (!options.fallbackBaseUrl) {
+    console.warn(
+      `[WARN] Truncated response for ${endpoint.method} ${endpoint.path} has no fallback URL. Using documented fields only.`
+    );
+    return documentedResponse ?? undefined;
+  }
+
+  try {
+    const fallbackResponse = await fetchFallbackEndpointResponse(
+      options.fallbackBaseUrl,
+      endpoint.path,
+      endpoint.method,
+    );
+
+    if (documentedResponse === null || documentedResponse === undefined) {
+      return fallbackResponse;
+    }
+
+    return mergeMissingFields(fallbackResponse, documentedResponse);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.warn(
+      `[WARN] Failed to hydrate truncated response for ${endpoint.method} ${endpoint.path}: ${message}`
+    );
+    return documentedResponse ?? undefined;
+  }
+}
+
+function mergeMissingFields(base: unknown, documented: unknown): unknown {
+  if (base === undefined) return documented;
+  if (Array.isArray(base) && Array.isArray(documented)) {
+    if (base.length === 0) return documented;
+    if (documented.length === 0) return base;
+
+    const [first, ...rest] = base;
+    return [mergeMissingFields(first, documented[0]), ...rest];
+  }
+
+  if (isPlainObject(base) && isPlainObject(documented)) {
+    const result: Record<string, unknown> = { ...base };
+
+    for (const [key, value] of Object.entries(documented)) {
+      if (!(key in result)) {
+        result[key] = value;
+        continue;
+      }
+
+      result[key] = mergeMissingFields(result[key], value);
+    }
+
+    return result;
+  }
+
+  return base;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**

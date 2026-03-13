@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test - Wrapped Response</title>
+</head>
+<body>
+    <h1>Get Categories</h1>
+
+    <table>
+        <tr>
+            <th>Work</th>
+            <td>Get Categories</td>
+        </tr>
+        <tr>
+            <th>URL</th>
+            <td>api/inventory/categories</td>
+        </tr>
+        <tr>
+            <th>Method</th>
+            <td>GET</td>
+        </tr>
+    </table>
+
+    <ac:structured-macro ac:name="code">
+        <ac:plain-text-body><![CDATA[Response Structure:
+{
+  "errors": false,
+  "data": [
+    {
+      "id": 1,
+      "name": "Category A"
+    }
+  ]
+}]]></ac:plain-text-body>
+    </ac:structured-macro>
+</body>
+</html>

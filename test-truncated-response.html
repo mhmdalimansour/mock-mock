@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test - Truncated Response</title>
+</head>
+<body>
+    <h1>Get Store Items</h1>
+
+    <table>
+        <tr>
+            <th>Work</th>
+            <td>Get Store Items</td>
+        </tr>
+        <tr>
+            <th>URL</th>
+            <td>api/store/items</td>
+        </tr>
+        <tr>
+            <th>Method</th>
+            <td>GET</td>
+        </tr>
+    </table>
+
+    <ac:structured-macro ac:name="code">
+        <ac:plain-text-body><![CDATA[Response Structure:
+{
+  "errors": false,
+  "data": {
+    "store_items": {
+      "current_page": 1,
+      "data": [
+        {
+          "id": 10831353,
+          "third_party_name": null,
+          .....
+          "item": {
+            "id": 10598946,
+            "ref": "QA TEST Z",
+            .....
+            "thumbnail_image": "/apps/storage/app/thumbnails/thumb_ciSbDxsYeH_8tPrs.jpeg_1765876550.jpg",
+            "addon_groups": [],
+            "category": {
+              "id": 41220,
+              "ref": "Baby Care"
+            }
+          }
+        }
+      ]
+    },
+    "store": {
+      "id": 10008376,
+      "op_city_id": 4,
+      .....
+      "features_config": {
+        "enable_manual_stacking": false,
+        "is_trade_invoice_enabled": true,
+        "optimized_thumbnail_images": true
+      }
+    }
+  }
+}]]></ac:plain-text-body>
+    </ac:structured-macro>
+</body>
+</html>
