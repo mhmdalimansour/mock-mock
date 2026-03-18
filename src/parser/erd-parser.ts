@@ -258,7 +258,11 @@ function parseEndpointFromTable($: cheerio.CheerioAPI, table: any): Partial<Mock
       // Parse URL field
       if (label.includes('url') || label.includes('endpoint')) {
         hasUrlRow = true;
-        let url = value.split('?')[0]; // Remove query params
+        let url = value.split('?')[0].trim(); // Remove query params
+        
+        // Fix truncated path params: {filter -> {filter}, {id -> {id}
+        // Confluence sometimes splits/truncates path params across elements
+        url = url.replace(/\{([^}]*)$/, (_, param) => (param ? `{${param}}` : ''));
         
         // Handle paths like "api/inventory/..." or "/api/inventory/..."
         if (url.startsWith('api/')) {

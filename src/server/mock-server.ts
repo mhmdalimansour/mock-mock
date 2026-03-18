@@ -207,6 +207,21 @@ function registerEndpoint(app: Application, endpoint: MockEndpoint, store: DataS
       case 'POST': {
         const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
         const newItem = store.addItem(collectionKey, body);
+        // Prefer documented response structure when available (not just placeholder)
+        const hasDocumentedResponse = response && typeof response === 'object' &&
+          (Array.isArray(response) || Object.keys(response as object).length > 0) &&
+          JSON.stringify(response) !== '{"message":"Success","data":{}}';
+        if (hasDocumentedResponse) {
+          const docResponse = generateFakeData(response);
+          // Merge created id into data when response has { data: {...} } and data is object
+          if (docResponse && typeof docResponse === 'object' && !Array.isArray(docResponse)) {
+            const doc = docResponse as Record<string, unknown>;
+            if (doc.data && typeof doc.data === 'object' && doc.data !== null) {
+              Object.assign(doc.data as Record<string, unknown>, { id: (newItem as Record<string, unknown>).id, ...body });
+            }
+          }
+          return res.status(status).json(docResponse);
+        }
         return res.status(status).json(newItem);
       }
 
@@ -216,7 +231,8 @@ function registerEndpoint(app: Application, endpoint: MockEndpoint, store: DataS
           const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
           const updated = store.updateItem(collectionKey, idValue, body);
           if (updated) return res.status(status).json(updated);
-          return res.status(404).json({ error: 'Not found' });
+          // Action endpoints (e.g. PUT /items/:id/thumbnail) have no collection; return documented response
+          return res.status(status).json(generateFakeData(response));
         }
         return res.status(status).json(generateFakeData(response));
       }
@@ -225,7 +241,8 @@ function registerEndpoint(app: Application, endpoint: MockEndpoint, store: DataS
         if (idValue) {
           const deleted = store.deleteItem(collectionKey, idValue);
           if (deleted) return res.status(204).send();
-          return res.status(404).json({ error: 'Not found' });
+          // Action endpoints may have no collection; return documented response instead of 404
+          return res.status(status).json(generateFakeData(response));
         }
         return res.status(status).json(generateFakeData(response));
       }

@@ -76,7 +76,7 @@ function generateFakeDataForField(key: string, value: unknown): unknown {
     if (lowerKey.includes('url') || lowerKey.includes('link')) {
       return faker.internet.url();
     }
-    if (lowerKey.includes('image') || lowerKey.includes('img') || lowerKey.includes('avatar')) {
+    if (lowerKey.includes('image') || lowerKey.includes('img') || lowerKey.includes('avatar') || lowerKey.includes('thumbnail')) {
       return faker.image.url();
     }
     
